@@ -1,0 +1,61 @@
+# my_project/docker-compose.yml
+version: '3.8'
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: mysql_db
+    environment:
+      MYSQL_ROOT_PASSWORD: password  # MySQL root 使用者的密碼
+      MYSQL_DATABASE: titanic_db     # 將要建立的資料庫名稱
+      MYSQL_USER: user               # 應用程式將使用的資料庫使用者
+      MYSQL_PASSWORD: password       # 應用程式將使用的資料庫使用者密碼
+    ports:
+      - "3306:3306" # 將容器的 3306 埠映射到主機的 3306 埠
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      # 將主機上的 data 目錄掛載到容器內的 /var/lib/mysql，用於資料持久化
+      - ./data/mysql:/var/lib/mysql
+
+  data-importer-service:
+    build: ./data-importer-service
+    container_name: data_importer_service
+    depends_on:
+      db:
+        condition: service_healthy # 確保 db 服務健康運行後才啟動
+    environment:
+      DB_HOST: db                  # 資料庫主機名，與 db 服務名稱相同
+      DB_NAME: titanic_db
+      DB_USER: user
+      DB_PASSWORD: password
+    restart: "no" # 這個服務只需要運行一次，成功後無需重啟
+
+  api-service:
+    build: ./api-service
+    container_name: api_service
+    depends_on:
+      db:
+        condition: service_healthy # 確保 db 服務健康運行後才啟動
+      data-importer-service:
+        condition: service_completed_successfully # 確保資料匯入服務成功完成後才啟動
+    environment:
+      DB_HOST: db                  # 資料庫主機名，與 db 服務名稱相同
+      DB_NAME: titanic_db
+      DB_USER: user
+      DB_PASSWORD: password
+    ports:
+      - "8000:8000" # 將容器的 8000 埠映射到主機的 8000 埠 (FastAPI 預設埠)
+    restart: unless-stopped # 除非手動停止，否則如果退出就重啟
+
+  web-frontend:
+    build: ./web-frontend
+    container_name: web_frontend
+    ports:
+      - "80:80" # 將容器的 80 埠映射到主機的 80 埠 (Nginx 預設埠)
+    depends_on:
+      api-service:
+        condition: service_started # 確保 api 服務啟動後才啟動
